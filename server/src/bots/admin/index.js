@@ -12,6 +12,7 @@ import { registerGiftHandlers } from './gift.js';
 import { registerStarsHandlers } from './stars.js';
 import { registerBroadcastHandlers } from './broadcast.js';
 import { registerStatsHandlers } from './stats.js';
+import { registerLogsHandlers } from './logs.js';
 
 let adminBotInstance = null;
 
@@ -66,6 +67,7 @@ export async function startAdminBot() {
   registerStarsHandlers(bot);
   registerBroadcastHandlers(bot);
   registerStatsHandlers(bot);
+  registerLogsHandlers(bot);
 
   // ─── Обработка ошибок ───
   bot.catch((err) => {
