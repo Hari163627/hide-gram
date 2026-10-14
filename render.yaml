@@ -1,0 +1,91 @@
+# render.yaml — конфиг деплоя Hide Gram на Render
+# Все секреты вводятся вручную в Dashboard → Environment
+# (в этом файле их нет!)
+
+services:
+  # ═══════════════════════════════════════════
+  # 1. BACKEND (Express + Prisma + 2 бота)
+  # ═══════════════════════════════════════════
+  - type: web
+    name: hide-gram-api
+    runtime: node
+    plan: free
+    region: frankfurt                    # ближайший к Украине
+    branch: main
+    rootDir: server
+    buildCommand: npm install && npx prisma generate && npx prisma migrate deploy
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "3000"
+
+      # ─── Supabase (вводишь сам в Dashboard) ───
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_PUBLISHABLE_KEY
+        sync: false
+      - key: SUPABASE_SECRET_KEY
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: DIRECT_URL
+        sync: false
+
+      # ─── Боты (вводишь сам в Dashboard) ───
+      - key: BOT_TOKEN_ADMIN
+        sync: false
+      - key: BOT_TOKEN_USER
+        sync: false
+      - key: ADMIN_TG_ID
+        sync: false
+
+      # ─── Безопасность (генерит Render) ───
+      - key: JWT_SECRET
+        generateValue: true
+
+      # ─── URL фронта (для CORS) ───
+      - key: CLIENT_URL
+        value: https://hide-gram-web.onrender.com
+
+  # ═══════════════════════════════════════════
+  # 2. FRONTEND (React + Vite → Static Site)
+  # ═══════════════════════════════════════════
+  - type: web
+    name: hide-gram-web
+    runtime: static
+    plan: free
+    region: frankfurt
+    branch: main
+    rootDir: client
+    buildCommand: npm install && npm run build
+    staticPublishPath: ./dist
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: VITE_API_URL
+        value: https://hide-gram-api.onrender.com
+      - key: VITE_WS_URL
+        value: https://hide-gram-api.onrender.com
+      - key: VITE_SUPABASE_URL
+        sync: false                       # вводишь сам
+      - key: VITE_SUPABASE_PUBLISHABLE_KEY
+        sync: false                       # вводишь сам
+    routes:
+      # SPA-роутинг: любой URL отдаёт index.html
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    headers:
+      # Кеш для ассетов (js/css) — навсегда
+      - path: /assets/*
+        name: Cache-Control
+        value: "public, max-age=31536000, immutable"
+      # index.html — не кешировать
+      - path: /index.html
+        name: Cache-Control
+        value: "no-cache"
