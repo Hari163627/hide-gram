@@ -1,0 +1,10 @@
+{
+  "name": "@hide-gram/shared",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    "./gifts": "./gifts.js",
+    "./constants": "./constants.js"
+  }
+}
