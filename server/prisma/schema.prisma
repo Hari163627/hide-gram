@@ -1,0 +1,266 @@
+// server/prisma/schema.prisma
+// Схема БД Hide Gram. Изменения применяются через `prisma migrate dev`.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")   // Transaction pooler, порт 6543
+  directUrl = env("DIRECT_URL")     // Session pooler, порт 5432 (для миграций)
+}
+
+// ═══════════════════════════════════════════
+// ПОЛЬЗОВАТЕЛИ
+// ═══════════════════════════════════════════
+model User {
+  id             String    @id @default(cuid())
+  phone          String    @unique                // номер, полученный от бота
+  username       String    @unique                // @username (можно менять)
+  displayName    String                            // отображаемое имя
+  bio            String?                           // о себе
+  avatarUrl      String?                           // ссылка на аватар (Supabase Storage)
+
+  tgId           String?   @unique                // привязка к Telegram ID
+
+  // Статусы
+  verified       Boolean   @default(false)        // синяя галочка
+  premiumUntil   DateTime?                         // Premium до даты
+  banned         Boolean   @default(false)
+  banReason      String?
+  banUntil       DateTime?
+
+  // Экономика
+  stars          Int       @default(0)            // баланс звёзд Hide Gram
+
+  // Настройки
+  language       String    @default("ru")         // ru/en/uk/de/es
+  theme          String    @default("system")     // system/light/dark
+
+  // Приватность
+  privacyPhone       String  @default("contacts") // everyone/contacts/nobody
+  privacyLastSeen    String  @default("everyone")
+  privacyAvatar      String  @default("everyone")
+
+  // Realtime-статус
+  lastSeen       DateTime  @default(now())
+  isOnline       Boolean   @default(false)
+
+  // Связи
+  gifts          Gift[]    @relation("GiftOwner")
+  giftsFrom      Gift[]    @relation("GiftFrom")
+  sentMessages   Message[] @relation("MessageSender")
+  sessions       Session[]
+  transactions   StarTransaction[]
+  ownedChats     ChatMember[]
+
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([username])
+  @@index([phone])
+}
+
+// ═══════════════════════════════════════════
+// СЕССИИ (httpOnly cookie)
+// ═══════════════════════════════════════════
+model Session {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token       String   @unique
+  userAgent   String?
+  ip          String?
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+
+  @@index([userId])
+  @@index([token])
+}
+
+// ═══════════════════════════════════════════
+// ВЫДАННЫЕ НОМЕРА (от админа или бота)
+// ═══════════════════════════════════════════
+model IssuedPhone {
+  id          String    @id @default(cuid())
+  phone       String    @unique
+  prefix      String                         // "+666"
+  issuedBy    String?                        // TG ID админа (если вручную)
+  issuedTo    String?                        // TG ID юзера (если через User-бот)
+  used        Boolean   @default(false)
+  usedAt      DateTime?
+  usedByUserId String?                       // ссылка на User, если зарегистрировался
+  expiresAt   DateTime
+  createdAt   DateTime  @default(now())
+
+  @@index([phone])
+  @@index([issuedTo])
+}
+
+// ═══════════════════════════════════════════
+// КОДЫ ПОДТВЕРЖДЕНИЯ (для входа)
+// ═══════════════════════════════════════════
+model AuthCode {
+  id          String    @id @default(cuid())
+  phone       String
+  tgId        String
+  code        String                         // 6 цифр
+  attempts    Int       @default(0)
+  used        Boolean   @default(false)
+  expiresAt   DateTime
+  createdAt   DateTime  @default(now())
+
+  @@index([phone])
+  @@index([tgId])
+}
+
+// ═══════════════════════════════════════════
+// ЧАТЫ (личные, группы, каналы)
+// ═══════════════════════════════════════════
+model Chat {
+  id          String       @id @default(cuid())
+  type        String       @default("private")  // private/group/channel
+  title       String?
+  avatarUrl   String?
+  description String?
+
+  members     ChatMember[]
+  messages    Message[]
+
+  lastMessageId String?
+  lastMessageAt DateTime?
+
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@index([lastMessageAt])
+}
+
+model ChatMember {
+  id        String   @id @default(cuid())
+  chatId    String
+  userId    String
+  chat      Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      String   @default("member")  // member/admin/owner
+  joinedAt  DateTime @default(now())
+
+  // Состояние прочтения
+  lastReadAt DateTime?
+
+  @@unique([chatId, userId])
+  @@index([userId])
+}
+
+// ═══════════════════════════════════════════
+// СООБЩЕНИЯ
+// ═══════════════════════════════════════════
+model Message {
+  id          String    @id @default(cuid())
+  chatId      String
+  senderId    String
+  chat        Chat      @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  sender      User      @relation("MessageSender", fields: [senderId], references: [id])
+
+  type        String    @default("text")    // text/photo/video/file/voice/gift/system
+  text        String?
+  mediaUrl    String?
+  metadata    Json?                          // доп. данные (например, id подарка)
+
+  // Статус доставки и прочтения
+  deliveredAt DateTime?
+  readAt      DateTime?
+
+  // Редактирование и удаление
+  editedAt    DateTime?
+  deletedAt   DateTime?
+
+  replyToId   String?
+  createdAt   DateTime  @default(now())
+
+  @@index([chatId, createdAt])
+  @@index([senderId])
+}
+
+// ═══════════════════════════════════════════
+// NFT-ПОДАРКИ
+// ═══════════════════════════════════════════
+model Gift {
+  id          String    @id @default(cuid())
+  nftId       String    @unique             // hg_pepe_0001
+  typeId      String                        // "pepe", "durov_cap", ...
+  serial      Int                            // порядковый номер в тираже
+
+  ownerId     String?
+  owner       User?     @relation("GiftOwner", fields: [ownerId], references: [id])
+  fromId      String?
+  from        User?     @relation("GiftFrom", fields: [fromId], references: [id])
+
+  message     String?                        // подпись при дарении
+
+  // Продажа
+  forSale     Boolean   @default(false)
+  salePrice   Int?
+  soldAt      DateTime?
+
+  // Происхождение
+  origin      String    @default("mint")    // mint/admin/shop/p2p
+  createdAt   DateTime  @default(now())
+
+  @@index([typeId])
+  @@index([ownerId])
+  @@index([forSale])
+}
+
+// ═══════════════════════════════════════════
+// ТРАНЗАКЦИИ ЗВЁЗД
+// ═══════════════════════════════════════════
+model StarTransaction {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  amount      Int                            // + пополнение, - списание
+  type        String                         // purchase/gift/transfer/fee/admin_bonus
+  description String?
+  metadata    Json?
+
+  // Внешний платёж (Telegram Stars / TON / Stripe)
+  externalId  String?   @unique
+  paymentMethod String?                      // telegram_stars/ton/stripe/admin
+
+  createdAt   DateTime  @default(now())
+
+  @@index([userId, createdAt])
+}
+
+// ═══════════════════════════════════════════
+// ЛОГИ АДМИНСКИХ ДЕЙСТВИЙ
+// ═══════════════════════════════════════════
+model AdminLog {
+  id          String    @id @default(cuid())
+  adminTgId   String
+  action      String                         // ban/verify/issue_phone/grant_gift/grant_stars
+  targetId    String?
+  payload     Json?
+  createdAt   DateTime  @default(now())
+
+  @@index([adminTgId, createdAt])
+  @@index([action])
+}
+
+// ═══════════════════════════════════════════
+// ЛИСТИНГИ МАРКЕТА (P2P-продажа подарков)
+// ═══════════════════════════════════════════
+model MarketListing {
+  id          String    @id @default(cuid())
+  giftId      String    @unique
+  sellerId    String
+  price       Int                            // цена в звёздах
+  active      Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  soldAt      DateTime?
+
+  @@index([active, price])
+}
